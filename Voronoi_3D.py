@@ -1,0 +1,321 @@
+import numpy as np
+import sys
+if sys.version_info[0] < 3:
+    raise Exception("delaunay_voro_3D.py requires Python 3.")
+
+class Vertex:
+    def __init__(self, p):
+        self.p = np.array(p)
+        self.adj = set() # adjacent tetrahedrons
+    
+    def __repr__(self):
+        r = "["
+        for p in self.p: 
+            r += "{0: >4.1f} - ".format(p)
+        return r[:-3] + "]"
+
+class Tetrahedron:
+    def __init__(self, p0, p1, p2, p3):
+        self.vert = [p0, p1, p2, p3]
+        for vert in self.vert:
+            vert.adj.add(self)
+        self.updateCircum()
+
+    def updateCircum(self):
+        points = [vtx.p for vtx in self.vert]
+        pts = points[1:] - points[0]
+
+        (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) = pts
+
+        l1 = x1 * x1 + y1 * y1 + z1 * z1
+        l2 = x2 * x2 + y2 * y2 + z2 * z2
+        l3 = x3 * x3 + y3 * y3 + z3 * z3
+
+        # Compute determinants:
+        dx = +l1 * (y2 * z3 - z2 * y3) - l2 * (y1 * z3 - z1 * y3) + l3 * (y1 * z2 - z1 * y2)
+        dy = +l1 * (x2 * z3 - z2 * x3) - l2 * (x1 * z3 - z1 * x3) + l3 * (x1 * z2 - z1 * x2)
+        dz = +l1 * (x2 * y3 - y2 * x3) - l2 * (x1 * y3 - y1 * x3) + l3 * (x1 * y2 - y1 * x2)
+        aa = +x1 * (y2 * z3 - z2 * y3) - x2 * (y1 * z3 - z1 * y3) + x3 * (y1 * z2 - z1 * y2)
+        # aa = T_orient3D(x1,x2,x3,x4=0)
+        #dx*x5-dy*y5+dz*z5-aa*l5 = T_Insphere(x1,x2,x3,x4=0,x5)
+        a = 2 * aa
+
+        if a == 0:
+            print("Found tetra with line: " + repr(self))
+
+        center = (dx / a, -dy / a, dz / a)
+        # center of sphere?
+        self.circum = np.array([
+            center[0] + points[0][0],
+            center[1] + points[0][1],
+            center[2] + points[0][2],
+        ])
+        self.circum_radius = np.linalg.norm(self.vert[0].p - self.circum)
+
+    def vertexInCircum(self, vert):
+        return np.linalg.norm(vert.p - self.circum) < self.circum_radius
+    
+    def sharesFaceWith(self, other):
+        # return the bool whether the common vertex of self.ver and other.vert is larger than or equal to 3 
+        return len(set(self.vert).intersection(other.vert)) >= 3
+
+    def __repr__(self):
+        r = "Tetra: "
+        for v in self.vert:
+            r += "{:>14} ".format(str(v))
+        return r
+
+    # Returns neighboring triangles set. (All triangles that share an edge with this one)
+    # NOTE: Because we did not implement this in 3d, we end up doing brute force for finding bat tetrahedrons
+    # This essentially means our actual implementation is N^2 for the 3D implementation.
+    # By implementing this we can do the expected NlogN.
+    # def neighbors(self):
+    #     # TODO: 3d
+    #     # PERF: can be optimized
+    #     result = set()
+    #     for vtx in self.vert:
+    #         for adj in vtx.adj:
+    #             if adj is not self and self.sharesEdgeWith(adj):
+    #                 result.add(adj)
+    #     return result;
+
+class Face:
+    def __init__(self, p0, p1, p2):
+        self.vert = [p0, p1, p2]
+
+    def __eq__(self, other):
+        return len(set(self.vert).intersection(other.vert)) == 3
+        
+def findPolyhedron(badTetras):
+    # PERF: can be optimized a lot
+    all_faces = []
+    for poly in badTetras:
+        all_faces.append(Face(poly.vert[0], poly.vert[1], poly.vert[2]))
+        all_faces.append(Face(poly.vert[1], poly.vert[2], poly.vert[3]))
+        all_faces.append(Face(poly.vert[2], poly.vert[3], poly.vert[0]))
+        all_faces.append(Face(poly.vert[3], poly.vert[0], poly.vert[1]))
+    
+    faces = []
+    for face in all_faces:
+        found = 0
+        for tested in all_faces:
+            if tested == face:
+                found += 1
+                if found > 1:
+                    break
+        if found == 1:
+            faces.append(face)
+
+    return faces
+
+            
+def triangulate(points, superSize = 50, removeSuper = False):
+    verts = []
+    for p in points:
+        verts.append(Vertex(p))
+    
+    # super polyhedron
+    d = superSize
+    verts.append(Vertex([ d, -0, -0]))
+    verts.append(Vertex([-0,  d, -0]))
+    verts.append(Vertex([-0, -0,  d]))
+    verts.append(Vertex([-0, -0, -0]))
+
+    superTetra = Tetrahedron(verts[-4], verts[-3], verts[-2], verts[-1])
+    delaunay = set()
+    delaunay.add(superTetra)
+
+    # Skip super tetrahedron points
+    for vtx in verts[:-4]:
+        # Find bad tetrahedrons
+        bad = set(filter(lambda tetr: (tetr.vertexInCircum(vtx)), delaunay))
+
+        # Find polygonal hole from bad tetrahedrons
+        polyhedron = findPolyhedron(bad)
+
+        # Remove bad tetrahedrons from triangulation
+        # Redundant faces?
+        for tetra in bad:
+            for tetraVtx in tetra.vert:
+                tetraVtx.adj.remove(tetra)
+            delaunay.remove(tetra)
+
+        for face in polyhedron:
+            delaunay.add(Tetrahedron(face.vert[0], face.vert[1], face.vert[2], vtx))
+
+    return delaunay
+
+#
+# Voronoi
+#
+
+
+class Polyface:
+    def __init__(self):
+        self.points = []
+        self.lines = []
+    def cal_centroid(self):
+        self.centroid = np.mean(self.points,axis=0)
+    def cal_Areas(self):
+        p0 = self.points[0]
+        self.Areas = np.zeros(3)
+        for i in range(2,len(self.points)):
+            v1=self.points[i]-p0
+            v2=self.points[i-1]-p0
+            self.Areas +=np.cross(v1,v2)/2
+    def add(self, p):
+        self.points.append(p)
+        if len(self.points) > 1:
+            self.lines.append([self.points[-2], self.points[-1]])
+
+class Edge:
+    def __init__(self, v0, v1):
+        if v0.p[0] > v1.p[0]: # Have explicit ordering to determine uniqueness
+            v0, v1 = v1, v0
+        self.vtx = [v0, v1]
+
+    def __eq__(self, other):
+        return self.vtx[0] == other.vtx[0] and self.vtx[1] == other.vtx[1]
+
+    def __hash__(self):
+        return hash((self.vtx[0], self.vtx[1]))
+
+def voronoi(delaunay):
+    edges = collections.defaultdict(Edge) # Unique delaunay edges
+    
+    for tetra in delaunay:
+        edges.setdefault(Edge(tetra.vert[0], tetra.vert[1]), set()).add(tetra)
+        edges.setdefault(Edge(tetra.vert[0], tetra.vert[2]), set()).add(tetra)
+        edges.setdefault(Edge(tetra.vert[0], tetra.vert[3]), set()).add(tetra)
+        edges.setdefault(Edge(tetra.vert[1], tetra.vert[3]), set()).add(tetra)
+        edges.setdefault(Edge(tetra.vert[1], tetra.vert[2]), set()).add(tetra)
+        edges.setdefault(Edge(tetra.vert[2], tetra.vert[3]), set()).add(tetra)
+
+    # make a poly face for each edge
+    voro = []
+    for edge, tetras in edges.items():
+        face = Polyface()
+        
+        # iterate all tetrahedrons around this edge and add their circumcenters as points
+        # we check for adjacency to form the proper polygon
+        # 找到每个顶点近邻四面体的外接球的球心并连接即可
+        current = tetras.pop()
+        face.add(current.circum) #外接球球心
+
+        while len(tetras) > 0:
+            for tetra in tetras:
+                if tetra.sharesFaceWith(current):
+                    current = tetra
+                    face.add(current.circum)
+                    break
+            try: tetras.remove(current)
+            except: break
+            
+        voro.append(face)
+    return voro 
+
+# imports. these are only used for plotting & drawing
+import matplotlib.pyplot as plt
+import matplotlib.collections
+from mpl_toolkits.mplot3d import Axes3D 
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from itertools import chain
+import collections
+import math as m
+
+##
+## Driver
+##
+
+def plot_delu(delu, ax, superSize = 0, color = False):
+    colorindex = 0
+    for tetra in delu:
+        lines = []
+        lines.append((tetra.vert[0].p, tetra.vert[1].p))
+        lines.append((tetra.vert[0].p, tetra.vert[2].p))
+        lines.append((tetra.vert[0].p, tetra.vert[3].p))
+        lines.append((tetra.vert[1].p, tetra.vert[3].p))
+        lines.append((tetra.vert[1].p, tetra.vert[2].p))
+        lines.append((tetra.vert[2].p, tetra.vert[3].p))
+
+
+        if superSize > 0:
+            # Remove lines that have at least one point in super tetrahedron
+            isSuper = lambda coord : coord <= 0.001 or coord >= superSize - 0.001
+            lines_filtered = []
+            for p1, p2 in lines:
+                if not (isSuper(p1[0]) or isSuper(p1[1]) or isSuper(p1[2]) or isSuper(p2[0]) or isSuper(p2[1]) or isSuper(p2[2])):
+                    lines_filtered.append((p1,p2))
+        else:
+            lines_filtered = lines
+
+        if color: 
+            for a, b in lines_filtered:
+                ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color="blue")
+        else:   
+            for a, b in lines_filtered:
+                ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]],color='C'+str(colorindex),ls='--')
+        colorindex+=1
+
+def plot_voro_lines(voro, ax, superSize = 0, color=False):
+    lines = []
+    for poly in voro:
+        for a, b in poly.lines:
+            lines.append((a, b))
+    
+    if superSize > 0:
+        # Remove lines that have BOTH points on the super tetra, the unbound faces will get clipped at super tetra
+        isSuper = lambda coord : coord <= 0.001 or coord >= superSize - 0.001
+        lines_filtered = []
+        for p1, p2 in lines:
+            p1_super = isSuper(p1[0]) or isSuper(p1[1]) or isSuper(p1[2])
+            p2_super = isSuper(p2[0]) or isSuper(p2[1]) or isSuper(p2[2])
+            if not (p1_super and p2_super):
+                lines_filtered.append((p1,p2))
+    else:
+        lines_filtered = lines
+
+    if color: 
+        for a, b in lines_filtered:
+            
+            ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]], color="red")
+    else:
+        for a, b in lines_filtered:
+            ax.plot([a[0], b[0]], [a[1], b[1]], [a[2], b[2]])
+    
+    
+def main():
+    SUPER_SIZE = 3 # How big is the edge of the super tetrahedron. Depends on input set but not calculated automatically
+    NUM_POINTS = 10
+    CUSTOM_SEED = 0
+    
+    if CUSTOM_SEED != 0: 
+        np.random.seed(CUSTOM_SEED)
+
+    points = np.random.rand(NUM_POINTS, 3)
+
+
+    delu = triangulate(points, superSize = SUPER_SIZE)
+    voro = voronoi(delu)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(points[:,0], points[:,1], points[:,2])
+    '''
+    plot_delu(delu, ax, SUPER_SIZE) # 3rd argument 0 disables culling of super tetra for both plot functions
+    
+    plot_voro_lines(voro, ax, 0)
+
+    ax.set_xlim(min(points[:,0]), max(points[:,0]))
+    ax.set_ylim(min(points[:,1]), max(points[:,1]))
+    ax.set_zlim(min(points[:,2]), max(points[:,2]))
+    
+
+    plt.show();
+    '''
+    return
+
+
+
+if __name__ == "__main__":
+    main()
