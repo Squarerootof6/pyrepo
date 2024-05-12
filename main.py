@@ -82,12 +82,16 @@ def determine_dt(Ri,ci,vi=0,CFL=0.3):
         print('dt is nan',Ri,ci,vi)
         dt=0.01
     return dt
-def refinement(celli):
+def derefinement(cells,i):
+    celli = cells[i]
+    V = celli.Volume
+    rho,u,v,w,p = cells.W_Grid
+    mass = cells.Mass[i]
+    momentum = mass*np.array([u,v,w])
+    U = W2U(celli.W)
     for face in celli.Faces:
-        
-    New = cells.voronoi.points[np.where(cells.W_Grid[:,-1]>0)]
-    print('{} particles are removed...{} remains...'.format(len(cells.voronoi.points)-len(New),len(New)))
-    return New
+        A = np.linalg.norm(face.Areas)
+        cells.W_Grid[:,face.adj_index] = np.array([mass/V,*momentum,U[-1]])/len(celli.Faces)
 def run():
     IC = h5py.File('./IC.hdf5','r')
     points = IC['Gas/Coordinates'][:].T
@@ -103,45 +107,44 @@ def run():
     IC.close()
     
     dt=0.01
-    Old_Wgrid = cells.W_Grid.copy() # [n*5]
-    Old_Ugrid = W2U(Old_Wgrid)
-    
+
     t=0;CFL=0.3;T=10
     SNAPSHOTNUM=20
     SNAPCOUNT=0
     REFINE = False
     
     while t<T:
-        New_Wgrid = Old_Wgrid.copy()
-        New_Ugrid = W2U(Old_Wgrid)
+        New_Ugrid = W2U(cells.W_Grid)
         
-        #dt = CFL*BoxSize**3/len(Old_Ugrid)/np.max(np.linalg.norm((Old_Wgrid[:,1:4])))
-        dt = determine_dt((3*cells.Mass/Old_Wgrid[0]/4/np.pi)**(1/3),np.sqrt(GAMMA*Old_Wgrid[4]/Old_Wgrid[0]),np.linalg.norm(Old_Wgrid[1:4].T,axis=1),CFL=CFL)
+        #dt = CFL*BoxSize**3/len(Old_Ugrid)/np.max(np.linalg.norm((cells.W_Grid[:,1:4])))
+        dt = determine_dt((3*cells.Mass/cells.W_Grid[0]/4/np.pi)**(1/3),np.sqrt(GAMMA*cells.W_Grid[4]/cells.W_Grid[0]),np.linalg.norm(cells.W_Grid[1:4].T,axis=1),CFL=CFL)
         print('t={},dt = {}\t'.format(t,dt)+str(datetime.datetime.now()))
         Cell_Vel = np.zeros_like(points)
         FLUX_GRID_RECORD = set()
         for i in range(points.shape[-1]):
             FLUX = np.array([0,0,0,0,0],dtype=np.float64)
             celli = cells[i]
-            m = Old_Ugrid[0,i]*celli.Volume
+            m = cells.Mass[i]
             if celli.Volume<0.05*BoxSize/(points.shape[-1]):
-                celli.alive=False
+                celli.alive = False
+                cells.Active[i] = 0
                 print('skip one death')
                 continue
             elif m>1.5*np.mean(cells.Mass):
                 REFINE = True
                 try:
                     new_points = np.hstack((new_points,[*(celli.coordinate+1e-4*celli.coordinate).reshape(3,-1)]))
-                    New_W = np.hstack((New_W,Old_Wgrid[:,i]))
-                    newmass = np.hstack((newmass,Old_Wgrid[0,i]*celli.Volume))
+                    New_W = np.hstack((New_W,cells.W_Grid[:,i]))
+                    cells.Mass[i] /=2
+                    newmass = np.hstack((newmass,cells.Mass[i]))
                 except:
                     new_points = np.array([*(celli.coordinate+1e-4*celli.coordinate).reshape(3,-1)])
-                    New_W = Old_Wgrid[:,i].reshape(5,-1)
-                    newmass = Old_Wgrid[0,i]*celli.Volume
+                    New_W = cells.W_Grid[:,i].reshape(5,-1)
+                    newmass = cells.W_Grid[0,i]*celli.Volume
                 
             Fg = Gravitational_force(celli,cells.Mass)
             PHI = Gravitational_Potential(celli,cells.Mass)
-            Cell_Vel[:,i] = Old_Wgrid[1:4,i]
+            Cell_Vel[:,i] = cells.W_Grid[1:4,i]
             DeltaE=0
             for face in celli.Faces:
                 A = np.linalg.norm(face.Areas)
@@ -153,8 +156,8 @@ def run():
                     FLUX+= pm*A*F
                     continue
                 else:
-                    Mesh_Vel = determine_MeshSpeed(celli,face,Old_Wgrid[1:4].T)
-                    WL,WR,rotator = Get_State(face,Old_Wgrid[:,i],Old_Wgrid[:,face.adj_index],Mesh_Vel)
+                    Mesh_Vel = determine_MeshSpeed(celli,face,cells.W_Grid[1:4].T)
+                    WL,WR,rotator = Get_State(face,cells.W_Grid[:,i],cells.W_Grid[:,face.adj_index],Mesh_Vel)
 
                     F,WS = HLLC_Riemann_Solver(WL,WR,PHI)
                     #不太懂论文里这部分怎么算的
@@ -170,33 +173,36 @@ def run():
                 DeltaE += (cells.Mass[i]-cells.Mass[face.adj_index])*(PHI - Gravitational_Potential(cells[face.adj_index],cells.Mass))
             New_Ugrid[:,i]-=dt*FLUX
             m_new = New_Ugrid[0,i]*celli.Volume
-            m = Old_Ugrid[0][i]*celli.Volume
             
             New_Ugrid[1:4,i] -= dt/2*(m*Fg+m_new*Fg)
             #v_new = U2W(New_Ugrid[i])[1:4]
             #New_Ugrid[i][-1] -= dt/2*(m*np.dot(Old_Ugrid[i][1:4],Fg)+m_new*np.dot(v_new,Fg))
             New_Ugrid[-1,i] += -dt*m*np.dot(Cell_Vel[:,i],Fg)-DeltaE/2 #Springel 2013
             # n+1 的phi还没算，先用老的代替
-        
-        #更新网格生成点的坐标
-        points += np.nan_to_num(Cell_Vel*dt)
-        if REFINE:
-            points = np.hstack((points,new_points))
-            Old_Wgrid = np.hstack((U2W(New_Ugrid),New_W))
-            Old_Ugrid = W2U(Old_Wgrid)
-            cells.Mass = np.hstack((cells.Mass,newmass))
-            print('add {} particles..'.format(new_points.shape[-1]))
-        else:
-            Old_Ugrid = New_Ugrid.copy()
-            New_Wgrid = U2W(New_Ugrid)
-            Old_Wgrid = New_Wgrid.copy()
-        
         if t/T>SNAPCOUNT/SNAPSHOTNUM:
         #if True:
             cells.save('./output/',SNAPCOUNT)
-            SNAPCOUNT+=1
-        cells = Create_Voronoi(BoxSize=BoxSize,points=points.T)
-        cells.W_Grid = New_Wgrid
+            SNAPCOUNT+=1       
+
+        #更新网格生成点的坐标
+        points += np.nan_to_num(Cell_Vel*dt)
+        for death_indeices in np.where(cells.Active==0)[0]:
+            derefinement(cells,death_indeices)
+        points = points[:,cells.Active==1]
+        New_Wgrid = U2W(New_Ugrid)[:,cells.Active==1].copy()
+        mass = cells.Mass[cells.Active==1].copy()
+        #New = cells.voronoi.points[np.where(cells.W_Grid[:,-1]>0)]
+        print('{} particles are removed...{} remains...'.format(len(np.where(cells.Active==0)[0]),len(points.T)))
+        if REFINE:
+            points = np.hstack((points,new_points))
+            cells = Create_Voronoi(BoxSize=BoxSize,points=points.T)
+            cells.W_Grid = np.hstack((New_Wgrid,New_W))
+            cells.Mass = np.hstack((mass,newmass))
+            print('add {} particles..'.format(new_points.shape[-1]))
+        else:
+            cells = Create_Voronoi(BoxSize=BoxSize,points=points.T)
+            cells.W_Grid = U2W(New_Ugrid)
+            cells.Mass = mass
         t+=dt
     
 if __name__ == '__main__':

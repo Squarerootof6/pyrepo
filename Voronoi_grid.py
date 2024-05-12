@@ -26,11 +26,13 @@ class VoronoiMesh:
             self.W_Grid = self.voronoi.W_Grid
             self.Cells = self.voronoi.Cells
             self.Mass = self.voronoi.Mass
+            self.Active = self.voronoi.Active
         else:
             self.Flux_Grid = np.zeros((5,len(self.voronoi.ridge_vertices)))
             self.W_Grid = np.zeros((5,len(self.voronoi.points)))
             self.Cells = {}
             self.Mass = np.zeros(len(self.voronoi.points))
+            self.Active = np.ones(len(self.voronoi.points))
     def __repr__(self):
         r = "["
         for p in self.voronoi.points: 
@@ -43,6 +45,7 @@ class VoronoiMesh:
             cell = Cell(index,self.voronoi.points[index])
             cell.Faces = self.find_face(index)
             cell.voronoi_points = self.voronoi.points
+            cell.W = self.W_Grid[:,index]
             #Voronoi多面体是凸多面体，所有多边形行列式均为正，此处abs省去逆时针排列顶点的麻烦
             cell.Volume = np.sum(np.abs([face.det for face in cell.Faces]))/6
             if cell.Volume == 0:

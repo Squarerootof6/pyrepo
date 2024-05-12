@@ -150,15 +150,14 @@ def W2F(W,PHI=True):
     else:
         E = ((u**2+v**2+w**2)/2+p/((GAMMA-1)*rho))*rho
         return np.array([rho*u,rho*u**2+p,rho*u*v,rho*u*w,u*(E+p)])
-if __name__=='__main__':
-
-    M=100;dx=0.01;dt=0.01;T=0.2;TT = 20
+def run(M=100,T=0.2,CFL=0.9,rhoL = 1,uL= 0.75,vL=0,wL=0,pL=1,rhoR = 0.125,uR=0,vR=0,wR=0,pR=0.1,x0 =0.3):
     
+    #M=100;dx=1/M;dt=0.01;T=0.2;
     fig,ax = plt.subplots(2,2,sharex=True)
-    IC_X=np.linspace(0,1,100)
+    IC_X=np.linspace(0,1,M)
     
-    rhoL = 1;uL= 0.75;vL=0;wL=0;pL=1;rhoR = 0.125;uR=0;vR=0;wR=0;pR=0.1;x0 =0.3; #test1
-    #rhoL = 1;uL= -2 ;pL=0.4;vL=0;wL=0;vR=0;wR=0;rhoR=1;uR=2;pR=0.4;x0 =0.5; #test2
+    #rhoL = 1;uL= 0.75;vL=0;wL=0;pL=1;rhoR = 0.125;uR=0;vR=0;wR=0;pR=0.1;x0 =0.3; #test1
+    rhoL = 1;uL= -2 ;pL=0.4;vL=0;wL=0;vR=0;wR=0;rhoR=1;uR=2;pR=0.4;x0 =0.5; #test2
     
     #rhoL = 1;uL= -2  ;pL=0.4;rhoR=1;uR=2;pR=0.4; #test4
     
@@ -175,11 +174,13 @@ if __name__=='__main__':
     ax[1][0].plot(IC_X-x0,IC_W.T[-1]) 
     ax[1][1].plot(IC_X-x0,IC_U.T[-1])
     #for t in np.arange(0,TT-1)[:2]:
-    t=0;CFL=0.3
+    t=0;dx=1/M
+    TT = [0]
     while t<T:
+        
         Old_U = result[-1]
         Old_W = U2W(np.array(Old_U).T,PHI).T
-        dt = CFL*dx/np.max(np.abs(np.linalg.norm(Old_W[:,1:4],axis=1)))
+        dt = CFL*dx/np.max(np.abs(np.linalg.norm(Old_W[:,1:4],axis=1)+np.sqrt(GAMMA*Old_W[:,-1]/Old_W[:,0])))
         print('t=\r',t, end='')
         New_U = Old_U.copy()
         for i in range(M):
@@ -202,17 +203,18 @@ if __name__=='__main__':
             #result[t+1][i]=result[t][i]+dt/dx*(Fm-Fp)
             New_U[i] = Old_U[i]+dt/dx*(Fm-Fp)
         result.append(New_U)
+        TT.append(t)
         t+=dt
     #np.save('./result3d',np.array(result))
+    #np.save('./timeseries',np.array(TT))
     #for i in range(len(result)):
     W_final = U2W(np.array(result[-1]).T,PHI)
-    print(W_final)
     ax[0][0].plot(IC_X-x0,W_final[0],label='simulation')
     ax[0][1].plot(IC_X-x0,W_final[1])
     ax[1][0].plot(IC_X-x0,W_final[-1]) 
     ax[1][1].plot(IC_X-x0,np.array(result[-1]).T[-1]) 
-    if True:
-    #if False:
+    #if True:
+    if False:
         mesh=IC_X-x0
         mesh_exact = np.linspace(np.min(mesh), np.max(mesh), int(2e3))
         exactsol = Riemann_exact(t=T, g=GAMMA,
@@ -249,7 +251,8 @@ if __name__=='__main__':
     ax[1][1].set_ylabel('E (erg)')
     ax[1][1].set_title('Energy',y=0.85)
     plt.subplots_adjust(hspace=0,wspace=0.3)
-    fig.savefig('./SODtest3D.pdf')
-    plt.show();
-    
-    
+    #fig.savefig('./SODtest3D.pdf')
+    plt.show()
+    return fig
+if __name__=='__main__':
+    run()
