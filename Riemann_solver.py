@@ -63,23 +63,58 @@ def Riemann_exact(t,g,Wl,Wr,grid):
     return rho,u,P
 
 def JACOBIANA(W):
+    '''
+    Compute the jacobian matrix of primitive variable A(W)
+    '''
     return np.array([[W[1],W[0],0],[0,W[1],1/W[0]],[0,GAMMA*W[2],W[1]]]) 
 def Inverse_JACOBIANA(W):
+    '''
+    Compute the inverse jacobian matrix of primitive variable A^-1(W)
+    '''
     rho,v,u,w,P=W
     a=np.sqrt(GAMMA*P/rho)
     return 1/(v**2-a**2)*np.array([[(v**2-a**2)/v,-rho,1/v],[0,v,-1/rho],[0,-rho*a**2,v]]) 
 def HLLC_State_Star(W,S,SK):
+    """Compute U_Star vector
+
+    Args:
+        W (_type_): primitive variable
+        S (_type_): S_star
+        SK (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     rhoK,uK,vK,wK,PK=W
     EK = ((uK**2+vK**2+wK**2)/2+PK/((GAMMA-1)*rhoK))*rhoK
     UStarK = np.array([1,S,vK,wK,EK/rhoK+(S-uK)*(S+PK/(rhoK*(SK-uK)))])*rhoK*((SK-uK)/(SK-S))
     return UStarK
 def decide_qk(ps,pK):
+    """Compute q_k as a scaling factor of sound speed
+
+    Args:
+        ps (_type_): p_star
+        pK (_type_): p_K, K=L or R
+
+    Returns:
+        _type_: _description_
+    """
     if ps<=pK:
         return 1
     if ps>pK:
         return np.sqrt(1+(GAMMA+1)/2/GAMMA*(ps/pK-1))
     
 def HLLC_Riemann_Solver(WL,WR,PHI=None):
+    """Compute HLLC Flux
+
+    Args:
+        WL (_type_): Left state in primitive variable (rho,u,v,w,p)
+        WR (_type_): Right state in primitive variable (rho,u,v,w,p)
+        PHI (float, optional): Gravitational potential. Defaults to None. If consider self gravity in simulation, the formula of energy will be adjusted.
+
+    Returns:
+        np.array: F_hllc
+    """
     rhoL,uL,vL,wL,PL=WL
     rhoR,uR,vR,wR,PR=WR
     #EL = (uL**2/2+PL/((GAMMA-1)*rhoL))*rhoL
@@ -127,6 +162,15 @@ def HLLC_Riemann_Solver(WL,WR,PHI=None):
     #Whllc = np.multiply(Inverse_JACOBIANA(W_bar),Fhllcih)
     return Fhllcih,W_bar
 def U2W(U,PHI=True):
+    """transform from conserved variables U to primitive variables W
+
+    Args:
+        U (ndarray): conserved variables U
+        PHI (float, optional): Gravitational potential.Defaults to True. If consider self gravity in simulation, the formula of energy will be adjusted. 
+
+    Returns:
+        ndarray: primitive variables W
+    """
     rho,rhou,rhov,rhow,E = U
     u = rhou/rho
     v = rhov/rho
@@ -137,12 +181,30 @@ def U2W(U,PHI=True):
         p = (E/rho-0.5*(u**2+v**2+w**2))*((GAMMA-1)*rho)
     return np.array([rho,u,v,w,p])
 def W2U(W,PHI=True):
+    """transform from primitive variables W to conserved variables U
+
+    Args:
+        W (ndarray): primitive variables W
+        PHI (float, optional): Gravitational potential.Defaults to True. If consider self gravity in simulation, the formula of energy will be adjusted. 
+
+    Returns:
+        ndarray: conserved variables U
+    """
     rho,u,v,w,p = W
     if PHI !=None:
         return np.array([rho,rho*u,rho*v,rho*w,rho*(0.5*(u**2+v**2+w**2)+p/((GAMMA-1)*rho)+PHI/2)])
     else:
         return np.array([rho,rho*u,rho*v,rho*w,rho*(0.5*(u**2+v**2+w**2)+p/((GAMMA-1)*rho))])
 def W2F(W,PHI=True):
+    """Compute Flux from primitive variable W
+
+    Args:
+        W (ndarray): primitive variables W
+        PHI (float, optional): Gravitational potential.Defaults to True. If consider self gravity in simulation, the formula of energy will be adjusted. 
+
+    Returns:
+        ndarray: Flux
+    """
     rho,u,v,w,p = W
     if PHI !=None:
         E = ((u**2+v**2+w**2)/2/2+p/((GAMMA-1)*rho))*rho/2 #势能项改为除以2保证伽利略变换下能量守恒形式不变
@@ -151,7 +213,27 @@ def W2F(W,PHI=True):
         E = ((u**2+v**2+w**2)/2+p/((GAMMA-1)*rho))*rho
         return np.array([rho*u,rho*u**2+p,rho*u*v,rho*u*w,u*(E+p)])
 def run(M=100,T=0.2,CFL=0.9,rhoL = 1,uL= 0.75,vL=0,wL=0,pL=1,rhoR = 0.125,uR=0,vR=0,wR=0,pR=0.1,x0 =0.3):
-    
+    """Perform simulation using Godunov scheme
+
+    Args:
+        M (int, optional): Number of pixels. Defaults to 100.
+        T (float, optional): End Time. Defaults to 0.2.
+        CFL (float, optional): Courant Friedrichs Lewy coefficient. Defaults to 0.9.
+        rhoL (int, optional): Density of left state. Defaults to 1.
+        uL (float, optional): Normal velocity of left state. Defaults to 0.75.
+        vL (int, optional): Tangential velocity of left state. Defaults to 0.
+        wL (int, optional): Tangential velocity of left state. Defaults to 0.
+        pL (int, optional): Pressure of left state. Defaults to 1.
+        rhoR (float, optional): Density of right state. Defaults to 0.125.
+        uR (int, optional): Normal velocity of right state. Defaults to 0.
+        vR (int, optional): Tangential velocity of right state. Defaults to 0.
+        wR (int, optional): Tangential velocity of right state. Defaults to 0.
+        pR (float, optional): Pressure of right state. Defaults to 0.1.
+        x0 (float, optional): Position of the discontinuity. Defaults to 0.3.
+
+    Returns:
+        fig: final figure of density,velocity,pressure,energy
+    """
     #M=100;dx=1/M;dt=0.01;T=0.2;
     fig,ax = plt.subplots(2,2,sharex=True)
     IC_X=np.linspace(0,1,M)
@@ -161,11 +243,9 @@ def run(M=100,T=0.2,CFL=0.9,rhoL = 1,uL= 0.75,vL=0,wL=0,pL=1,rhoR = 0.125,uR=0,v
     
     #rhoL = 1;uL= -2  ;pL=0.4;rhoR=1;uR=2;pR=0.4; #test4
     
-    '''result  = np.zeros((TT,M,3))*np.nan
-    IC_W = np.array([[rhoL,uL,pL]]*int(M*x0)+[[rhoR,uR,pR]]*(M-int(M*x0)))
-    result[0] = np.array([[[rhoL,rhoL*uL,rhoL*(uL**2/2+pL/((GAMMA-1)*rhoL))]]*int(M*x0)+[[rhoR,rhoR*uR,rhoR*(uR**2/2+pR/((GAMMA-1)*rhoR))]]*(M-int(M*x0))])
-    IC_U = result[0]'''
-    
+
+    """Set Initial Condition
+    """
     IC_W = np.array([[rhoL,uL,vL,wL,pL]]*int(M*x0)+[[rhoR,uR,vR,wR,pR]]*(M-int(M*x0)))
     result = [[[rhoL,rhoL*uL,rhoL*vL,rhoL*wL,rhoL*(uL**2/2+pL/((GAMMA-1)*rhoL))]]*int(M*x0)+[[rhoR,rhoR*uR,rhoR*vR,rhoR*wR,rhoR*(uR**2/2+pR/((GAMMA-1)*rhoR))]]*(M-int(M*x0))]
     IC_U = np.array(result[0])
@@ -180,10 +260,16 @@ def run(M=100,T=0.2,CFL=0.9,rhoL = 1,uL= 0.75,vL=0,wL=0,pL=1,rhoR = 0.125,uR=0,v
         
         Old_U = result[-1]
         Old_W = U2W(np.array(Old_U).T,PHI).T
+        """
+        decide dt for current time.
+        """
         dt = CFL*dx/np.max(np.abs(np.linalg.norm(Old_W[:,1:4],axis=1)+np.sqrt(GAMMA*Old_W[:,-1]/Old_W[:,0])))
         print('t=\r',t, end='')
         New_U = Old_U.copy()
         for i in range(M):
+            """
+            transmissive boundary conditions
+            """
             if i == 0:
                 WL = U2W(Old_U[i]  ,PHI)
                 WR = U2W(Old_U[i+1],PHI)
@@ -251,7 +337,7 @@ def run(M=100,T=0.2,CFL=0.9,rhoL = 1,uL= 0.75,vL=0,wL=0,pL=1,rhoR = 0.125,uR=0,v
     ax[1][1].set_ylabel('E (erg)')
     ax[1][1].set_title('Energy',y=0.85)
     plt.subplots_adjust(hspace=0,wspace=0.3)
-    #fig.savefig('./SODtest3D.pdf')
+    fig.savefig('./test23D.pdf', pad_inches=0)
     plt.show()
     return fig
 if __name__=='__main__':

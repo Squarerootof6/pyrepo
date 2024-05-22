@@ -71,7 +71,7 @@ class VoronoiMesh:
             ax.scatter(*ptp.T,ls='--' ,c='r')
             ax.plot(*vts.T,c='r')
             ax.scatter(*face.centroid,c='b',s=2)
-            ax.quiver(*face.centroid, *(face.centroid+face.Areas), length=0.1, normalize=True, color='blue')
+            #ax.quiver(*face.centroid, *(face.centroid+face.Areas), length=0.1, normalize=True, color='blue')
     def show_all_face(self,ax):
         ax.scatter(*self.voronoi.points.T,c='grey',alpha=0.5)
         for face in self.voronoi.ridge_vertices[:100]:
@@ -132,7 +132,7 @@ class Polyface:
             self.lines.append([self.Vertices[-2], self.Vertices[-1]])
             
 if __name__=='__main__':
-    points=np.random.rand(10**3, 3)
+    points=np.random.rand(5**3, 3)
     import time
     start = time.time()
     cells = Create_Voronoi(1,points)
